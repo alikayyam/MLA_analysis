@@ -1,0 +1,133 @@
+% Appendix: Extended discussion of Figure 1 (cross-model D_Gram profiles).
+% Include with: \input{appendix_ushape_discussion}
+%
+% Required packages: booktabs, siunitx (optional, for number formatting)
+
+\section{Extended Discussion of Figure~\ref{fig:ushape}}
+\label{app:ushape}
+
+Figure~\ref{fig:ushape} plots $D_\text{Gram}$ against normalised depth
+$\ell / L$ so that the three networks are directly comparable despite having
+$L \in \{27, 60, 62\}$ layers.
+This appendix provides the supporting numerics and qualifications.
+Full per-layer tables are in Appendix~\ref{app:per-layer-tables}.
+
+% ----------------------------------------------------------------
+\subsection{Collapse Zone Boundaries}
+\label{app:collapse-zones}
+
+We define the \emph{collapse zone} as the contiguous run of layers satisfying
+$D_\text{Gram} < D_\text{thresh}$, where $D_\text{thresh}$ is set to
+$2 \times D_\text{min}$ for each model.
+Table~\ref{tab:collapse-zones} summarises the resulting boundaries.
+
+\begin{table}[h]
+\centering
+\caption{Collapse zone boundaries per model.
+  $D_\text{min}$: global minimum $D_\text{Gram}$.
+  $D_\text{thresh} = 2 \times D_\text{min}$.
+  Coverage: fraction of layers inside the collapse zone.}
+\label{tab:collapse-zones}
+\begin{tabular}{lcccccc}
+\toprule
+Model & $L$ & $D_\text{min}$ & Layer & $D_\text{thresh}$ & Zone & Coverage \\
+\midrule
+V2-Lite (16B) & 27 & 0.0203 & 19 & 0.0406 & 7--26 & 74\% \\
+V2     (236B) & 60 & 0.0080 & 53 & 0.0160 & 22--54 & 55\% \\
+V3     (671B) & 62 & 0.0097 & 46 & 0.0194 & 9--57  & 79\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent
+V3's collapse zone is interrupted at layer~47
+($D_\text{Gram} = 0.028$, just above $D_\text{thresh} = 0.019$) and at
+layers~40--41 ($D_\text{Gram} \approx 0.015$--$0.018$, which are inside).
+Depending on whether one requires strict contiguity, the V3 zone is either
+a single run (9--57, 79\%) or two sub-zones separated by the layer-47
+excursion.
+The main text uses the single-run definition; results are insensitive to
+this choice.
+
+% ----------------------------------------------------------------
+\subsection{Early-Layer Spikes}
+\label{app:early-spikes}
+
+Each model exhibits an elevated $D_\text{Gram}$ in its first few layers
+before the collapse, but the character differs across scales.
+
+\begin{itemize}
+  \item \textbf{V2-Lite (16B).}
+    A single sharp spike at layer~0 ($D_\text{Gram} = 0.104$),
+    $5.1\times$ the global minimum, followed by rapid decline over layers~1--6.
+
+  \item \textbf{V2 (236B).}
+    A sharper single spike at layer~0 ($D_\text{Gram} = 0.213$),
+    $26.7\times$ the global minimum — the largest absolute value across all
+    three models.
+    Layers~1--9 form a broad shoulder ($D_\text{Gram} \approx 0.04$--$0.07$)
+    before collapse.
+
+  \item \textbf{V3 (671B).}
+    An elevated \emph{plateau} across layers~0--8
+    ($D_\text{Gram} = 0.032$--$0.067$, mean $0.057$) rather than a single
+    dominant spike.
+    No individual layer reaches the extreme values seen in V2.
+\end{itemize}
+
+The transition from spike (V2-Lite, V2) to plateau (V3) may reflect the
+greater number of attention heads in V3 ($n_h = 128$ vs.\ $128$ for both V2
+variants, with a larger total embedding dimension $d = 7168$ for V3 vs.\
+$5120$ for V2-Lite and $d$ for V2). % TODO: confirm V2 and V3 hidden dims
+
+% ----------------------------------------------------------------
+\subsection{Late-Layer Divergence and the Scale Dependence of the U-Shape}
+\label{app:late-layer}
+
+\begin{table}[h]
+\centering
+\caption{Late-layer $D_\text{Gram}$ statistics.
+  ``Late zone'' = last 10\% of layers.
+  Late/min ratio measures divergence relative to the collapse floor.}
+\label{tab:late-layer}
+\begin{tabular}{lcccc}
+\toprule
+Model & Late zone & Peak $D_\text{Gram}$ & Layer & Late/min ratio \\
+\midrule
+V2-Lite (16B) & layers 24--26 & 0.0335 & 25 & $1.7\times$ \\
+V2     (236B) & layers 54--59 & 0.0144 & 59 & $1.8\times$ \\
+V3     (671B) & layers 56--61 & 0.1670 & 60 & $\mathbf{17.2\times}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The late-layer ratio is nearly identical at 16B and 236B ($\approx 1.7$--$1.8\times$)
+and then jumps discontinuously to $17.2\times$ at 671B (Table~\ref{tab:late-layer}).
+This is not a smooth scaling trend; the emergent late-layer divergence in V3
+appears to be a qualitative change rather than a quantitative one.
+
+Within the V3 late zone, the divergence is highly localised:
+layer~60 ($D_\text{Gram} = 0.167$) is flanked on both sides by layers with
+$D_\text{Gram} \approx 0.015$--$0.016$ (layers~59 and~61).
+Layer~58 shows a secondary spike ($D_\text{Gram} = 0.082$), also flanked by
+low values.
+The two-spike pattern at layers~58 and~60 (with a trough at~59) suggests
+these are structurally distinct from the surrounding layers, possibly serving
+a different computational role at the boundary between deep processing and
+output projection.
+
+% ----------------------------------------------------------------
+\subsection{Mean Principal Angle $\bar\theta$}
+\label{app:theta}
+
+$\bar\theta$ is near zero for every layer in all three models
+(range $0.009$--$0.020°$ across 149 layer measurements).
+This is a structural consequence of the up-projection matrices having full
+column rank $r = 512$: since $\operatorname{Col}(\widetilde{W}_K)$ and
+$\operatorname{Col}(\widetilde{W}_V)$ both equal $\operatorname{Col}(W_c) =
+\mathbb{R}^r$ generically, all canonical angles are zero.
+We report $\bar\theta$ in the per-layer tables (Appendix~\ref{app:per-layer-tables})
+for completeness and as a rank sanity check; the values confirm full column rank
+throughout all three networks.
+No layer in any model shows $\bar\theta > 0.021°$, ruling out any low-rank
+structure in the up-projections.

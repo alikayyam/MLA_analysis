@@ -1,0 +1,14 @@
+model_name: deepseek-v2
+hf_repo: deepseek-ai/DeepSeek-V2
+hidden_size: 5120
+kv_lora_rank: 512
+qk_nope_head_dim: 128
+qk_rope_head_dim: 64
+v_head_dim: 128
+num_attention_heads: 128
+num_hidden_layers: 60
+weight_key_down: kv_a_proj_with_mqa.weight
+weight_key_up: kv_b_proj.weight
+weight_layernorm_w: kv_a_layernorm.weight
+weight_layernorm_b: kv_a_layernorm.bias
+layer_prefix: "model.layers.{i}.self_attn"

@@ -1,0 +1,22 @@
+# Model weights (too large to push)
+models/
+
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+logs/
+
+# OS
+.DS_Store

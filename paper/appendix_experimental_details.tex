@@ -1,0 +1,150 @@
+% Appendix: Extended Experimental Details
+% Intended for \appendix section of the main paper.
+% Include with: \input{appendix_experimental_details}
+
+\section{Extended Experimental Details}
+\label{app:experimental-details}
+
+\subsection{Hardware and Software}
+\label{app:hardware}
+
+All experiments were run on a single workstation with 62\,GB DDR4 RAM and an
+Intel Core i7-6850K (6 cores / 12 threads, 3.6\,GHz, AVX2, no native BF16).
+Four installed GTX~1080~Ti GPUs (compute capability 6.1) are incompatible with
+the installed PyTorch build (2.12.0+cu130, which requires CC~$\geq$~7.5); all
+computation is therefore CPU-only.
+BF16 matrix operations fall back to FP32 via oneDNN.
+Model weights are kept in \texttt{bfloat16} throughout
+(31\,GB resident memory for DeepSeek-V2-Lite).
+
+\medskip\noindent
+\textbf{Software versions:}
+Python~3.12,
+PyTorch~2.12.0,
+Transformers~5.3.0,
+safetensors~0.7.0,
+datasets (Salesforce/wikitext).
+All forward passes use \texttt{OMP\_NUM\_THREADS=12} and \texttt{use\_cache=False}.
+
+% ----------------------------------------------------------------
+\subsection{Model Loading and the \texttt{\_tied\_weights\_keys} Bug}
+\label{app:loading-bug}
+
+Loading DeepSeek-V2-Lite via \texttt{AutoModelForCausalLM.from\_pretrained}
+under Transformers~5.x silently fails to load any weights from the checkpoint.
+The root cause is in the model's remote code (\texttt{modeling\_deepseek.py}):
+
+\begin{verbatim}
+_tied_weights_keys = ["lm_head.weight"]   # old Transformers 4.x list format
+\end{verbatim}
+
+Transformers~5.x calls \texttt{.keys()} on this attribute, expecting a
+\texttt{dict}; the \texttt{list} raises \texttt{AttributeError}.
+The exception is caught internally and stored as a \texttt{SkipParameters}
+conversion error, after which \texttt{\_initialize\_missing\_keys} calls
+\texttt{\_init\_weights}, re-initialising every \texttt{nn.Linear} and
+\texttt{nn.Embedding} weight to $\mathcal{N}(0,\,0.02)$.
+\texttt{nn.LayerNorm} weights are not handled by \texttt{\_init\_weights}
+and remain at the PyTorch default (all-ones, $\sigma=0$).
+The result is that all 5{,}291 named parameters take initialisation values
+rather than the trained checkpoint.
+
+\medskip\noindent
+\textbf{Symptom.}
+WikiText-2 perplexity $\approx 129{,}000$.
+A standard detection heuristic---flagging parameters whose empirical standard
+deviation satisfies $|\sigma - 0.02| < 0.003$---corrected the
+\texttt{nn.Linear} and \texttt{nn.Embedding} parameters but missed the 82
+LayerNorm weights, whose trained standard deviations ($\approx 0.017$--$0.019$)
+lie within the same tolerance window as the initialisation value.
+After heuristic repair, perplexity remained $\approx 1.7 \times 10^{11}$,
+indicating the LayerNorm weights are load-bearing.
+
+\medskip\noindent
+\textbf{Fix.}
+After \texttt{from\_pretrained}, every named parameter is unconditionally
+overwritten by re-reading directly from the safetensors shards:
+
+\begin{verbatim}
+for shard_file, keys in sorted(shard_to_keys.items()):
+    with safe_open(shard_path, framework="pt", device="cpu") as f:
+        for key in keys:
+            model_params[key].data.copy_(
+                f.get_tensor(key).to(dtype))
+\end{verbatim}
+
+\noindent
+Shards are processed sequentially; peak extra memory is one open shard
+($\approx$8\,GB) alongside the resident model ($\approx$31\,GB), well within
+the 62\,GB budget.
+Correctness was verified by comparing per-parameter standard deviations
+against checkpoint values for a representative set spanning all weight types
+(embeddings, attention projections, MoE experts, layer norms, LM head).
+After the fix, WikiText-2 perplexity is 6.275 (Table~\ref{tab:exp3-results}).
+
+% ----------------------------------------------------------------
+\subsection{Perplexity Evaluation Protocol}
+\label{app:ppl}
+
+\textbf{Dataset.}
+WikiText-2 validation split~\citep{merity2017pointer}, loaded via the
+Salesforce/wikitext HuggingFace repository.
+The full validation text is concatenated into a single token sequence
+(${\approx}273$K tokens under the DeepSeek-V2-Lite tokenizer).
+
+\medskip\noindent
+\textbf{Sliding-window protocol.}
+Context window $L = 512$, stride $s = 512$ (non-overlapping windows).
+Each forward pass scores the final $\min(s, \text{chunk length})$ tokens.
+No overlap is used; the estimate is therefore a strict upper bound on the
+true held-out NLL but is consistent across all experimental conditions.
+
+\medskip\noindent
+\textbf{Sample budget.}
+For Experiment~2 (activation alignment), forward passes cover the first
+50{,}000 tokens (${\approx}97$ chunks).
+For Experiment~3 (clamping), each PPL estimate uses the first 30 chunks
+(${\approx}15{,}360$ tokens, ${\approx}29$\,minutes wall-clock per evaluation
+on this hardware).
+We verified that the 30-chunk estimate produces stable \emph{rankings} across
+conditions: running the baseline on the full validation set gives PPL~6.10
+versus 6.275 for 30 chunks, a 2.7\% difference that does not affect any
+qualitative conclusion.
+
+% ----------------------------------------------------------------
+\subsection{Clamping Implementation}
+\label{app:clamping}
+
+The weight tensor \texttt{kv\_b\_proj.weight} has shape
+$\bigl[n_h(d_{qk} + d_v),\; r\bigr]$,
+where rows $[0 : n_h d_{qk}]$ encode $W_K^\uparrow$ and rows
+$[n_h d_{qk} : n_h(d_{qk}+d_v)]$ encode $W_V^\uparrow$.
+All DeepSeek-V2/V2-Lite/V3 variants satisfy $d_{qk} = d_v = 128$; this
+equality is asserted before any modification.
+
+The intervention $W_K^\uparrow \leftarrow W_V^\uparrow$ is applied by copying
+the V-block into the K-block under \texttt{torch.no\_grad()}.
+For each experimental condition, original weights are saved before clamping and
+restored after the PPL evaluation, so all conditions share a single model
+resident in memory and only one copy of the modified weights exists at a time.
+
+\medskip\noindent
+\textbf{Layer schedules.}
+The \emph{middle\_block} schedule clamps layers
+$\bigl[\lfloor 0.25L \rfloor, \lfloor 0.75L \rfloor\bigr)$
+(layers 6--19 for $L=27$, covering 52\% of the network).
+The \emph{global} schedule clamps all $L$ layers.
+
+\medskip\noindent
+\textbf{Direction comparison.}
+Both directions were evaluated to check asymmetry between the key and value
+pathways (Table~\ref{tab:exp3-results}).
+For the \emph{middle\_block} schedule the two directions give nearly identical
+$\Delta\text{PPL}$ ($+10.10$ vs.\ $+10.72$, a 6\% difference), confirming that
+K and V are interchangeable in the collapse zone.
+For the \emph{global} schedule, $W_K^\uparrow \leftarrow W_V^\uparrow$
+(PPL~$= 1190$) is $2.9\times$ more damaging than
+$W_V^\uparrow \leftarrow W_K^\uparrow$ (PPL~$= 413$).
+The asymmetry is driven by early layers (layers~0--5, high $D_\text{Gram}$)
+where corrupting attention routing (replacing keys with value-derived
+projections) is more harmful than corrupting value extraction.
