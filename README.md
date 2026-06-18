@@ -36,16 +36,20 @@ All tests run against a synthetic `ToyMLAModel` with the same weight structure a
 
 ### Download models
 
+A convenience script handles all three models with estimated download times:
+
 ```bash
-# V2-Lite (16B, ~31 GB) — proxy model for Exp 2 and 3
-hf download deepseek-ai/DeepSeek-V2-Lite --local-dir models/deepseek-v2-lite
-
-# V2 (236B, ~472 GB) — required for U-curve paper results
-hf download deepseek-ai/DeepSeek-V2 --local-dir models/deepseek-v2
-
-# V3 (671B, ~1.3 TB) — required for U-curve paper results (FP8, auto-dequantized)
-hf download deepseek-ai/DeepSeek-V3 --local-dir models/deepseek-v3
+./scripts/download_models.sh           # all three (~1.1 TB total)
+./scripts/download_models.sh lite      # V2-Lite only (~30 GB) — sufficient for Exp 2 and 3
+./scripts/download_models.sh v2        # V2 only (~440 GB)
+./scripts/download_models.sh v3        # V3 only (~642 GB)
 ```
+
+Requires `huggingface-cli` (`pip install huggingface_hub`) and an HF login or `HF_TOKEN` set.
+
+> **Note**: model checkpoints are not committed to this repo. All experiment results
+> (`.npz`, `.json`, plots) are pre-computed and committed under `results/` so figures
+> and tables in the paper can be reproduced from those files without re-downloading.
 
 ### Experiment 1: Weight Audit
 
@@ -116,6 +120,7 @@ scripts/
   run_exp1_weight_audit.py
   run_exp2_activation.py
   run_exp3_clamping.py
+  download_models.sh        # re-download checkpoints after deletion
 tests/                    # 27 unit tests, all run without downloading any model
 results/                  # .npz outputs and plots (created at runtime)
 ```
@@ -127,6 +132,8 @@ results/                  # .npz outputs and plots (created at runtime)
 **Memory-efficient Gram distance**: avoids forming any [d × output_dim] matrix. Uses the identity tr(W̃_K W̃_K^T) = tr(C M_KK) where C = W_c^T W_c and M_KK = W_K↑^T W_K↑, all [r × r].
 
 **Principal angles**: for full-rank up-projections, Col(W̃_K) = Col(W̃_V) = Col(W_c) exactly — angles are non-trivial only when effective rank < r (as in trained models). The SVD method computes Q_K via: SVD of W_K↑ → right singular vectors V_K → QR of W_c @ V_K, all in O(d·r) memory.
+
+**Weight loading bug fix**: `modeling_deepseek.py` declares `_tied_weights_keys = ["lm_head.weight"]` as a list, which Transformers 5.x interprets by calling `.keys()` — causing an `AttributeError` that silently leaves all parameters at random init. `src/model_io/model_loader.py` works around this with an unconditional reload from safetensors shards after `AutoModel.from_pretrained`. See `paper/appendix_experimental_details.tex` for full details.
 
 **HuggingFace weight names** (differ from paper notation):
 | Paper | HuggingFace key | Shape |
